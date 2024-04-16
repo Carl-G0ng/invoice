@@ -1,11 +1,17 @@
 package main
 
 import (
-	"bufio"
+	"archive/zip"
 	"fmt"
+	"github.com/satori/go.uuid"
 	"github.com/unidoc/unipdf/v3/common/license"
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
+	"time"
+
+	"html/template"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,27 +19,18 @@ import (
 	"strings"
 )
 
+const (
+	defaultApiKey  = "384e92997199140a8eda3cc184ecf29ecab602d9230504e6224024f0d4315c80"
+	defaultMembers = "Carl.Gong, Xuhui.Shi, Makiyo.Jiang, Sunny Tang"
+)
+
 func init() {
-
-}
-
-func main() {
-	apiKey := "384e92997199140a8eda3cc184ecf29ecab602d9230504e6224024f0d4315c80"
-
+	apiKey := defaultApiKey
 	// 获取命令行参数
 	args := os.Args[1:]
 	if len(args) == 1 {
 		apiKey = args[0]
 	}
-	members := "Carl.Gong, Xuhui.Shi, Makiyo.Jiang, Sunny Tang"
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Print("请输入下午茶人员(如跳过将采用成都Team默认值)：")
-	scanner.Scan()
-	scannerText := scanner.Text()
-	if len(scannerText) > 0 {
-		members = scannerText
-	}
-	fmt.Printf("人员：%s\n", members)
 
 	// To get your free API key for metered license, sign up on: https://cloud.unidoc.io
 	// Make sure to be using UniPDF v3.19.1 or newer for Metered API key support.
@@ -62,17 +59,246 @@ func main() {
 	} else {
 		fmt.Printf("State is not OK\n")
 	}
+}
 
-	// 获取当前目录
-	dir, err := os.Getwd()
+func GetUUID() string {
+	uid := uuid.NewV4()
+	return uid.String()
+}
+
+func clearTempDir(path string) error {
+	fmt.Printf("删除 temp 目录及其所有内容")
+	// 删除 temp 目录及其所有内容
+	return os.RemoveAll(path)
+}
+
+type PageData struct {
+	TempPath string
+	Result   string
+}
+
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
+
+	// 获取member参数的值
+	member := r.FormValue("member")
+	fmt.Println("member参数的值:", member)
+
+	uuid := GetUUID()
+
+	tempPath := "./temp/" + uuid
+	//tempPath := "./temp/" + uuid
+	//defer clearTempDir(tempPath)
+
+	// 清理 temp 目录
+	err := clearTempDir(tempPath)
 	if err != nil {
-		fmt.Println("获取当前目录出错:", err)
+		http.Error(w, "清理目录出错", http.StatusInternalServerError)
+		return
 	}
 
+	// 解析表单
+	err = r.ParseMultipartForm(10 << 20) // 限制上传文件大小为10MB
+	if err != nil {
+		http.Error(w, "解析表单出错", http.StatusInternalServerError)
+		return
+	}
+	//临时保存pdf
+	saveFilesToTemp(tempPath, w, r)
+
+	//fmt.Fprintf(w, "zip 下载链接：http://localhost:8080/download?directory=%v \n", tempPath)
+	//收集转换pdf
+	resultToShow := genNewPdf(member, tempPath)
+
+	// 构建PageData结构体
+	data := PageData{
+		TempPath: tempPath,
+		Result:   resultToShow,
+	}
+	// 加载HTML模板文件
+	tmpl, err := template.ParseFiles("result.html")
+	if err != nil {
+		http.Error(w, "加载HTML模板文件出错", http.StatusInternalServerError)
+		return
+	}
+
+	// 执行HTML模板文件并将结果写入HTTP响应体
+	err = tmpl.Execute(w, data)
+	if err != nil {
+		http.Error(w, "执行HTML模板文件出错", http.StatusInternalServerError)
+		return
+	}
+
+}
+
+func zipFiles(directory string, w io.Writer) error {
+	// 创建一个新的 zip 文件
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	// 遍历指定目录下的所有文件和子目录
+	err := filepath.Walk(directory, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// 获取文件相对于指定目录的相对路径
+		relPath, err := filepath.Rel(directory, filePath)
+		if err != nil {
+			return err
+		}
+
+		// 如果是目录，则创建 zip 文件中的一个目录条目
+		if info.IsDir() {
+			_, err = zipWriter.Create(relPath + "/")
+			return err
+		}
+
+		// 创建 zip 文件中的一个文件条目
+		fileWriter, err := zipWriter.Create(relPath)
+		if err != nil {
+			return err
+		}
+
+		// 打开文件
+		file, err := os.Open(filePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		// 将文件内容写入 zip 文件
+		_, err = io.Copy(fileWriter, file)
+		return err
+	})
+
+	return err
+}
+
+func downloadHandler(w http.ResponseWriter, r *http.Request) {
+	// 获取当前时间
+	now := time.Now()
+
+	// 获取当前月份和日期
+	year := now.Year()
+	month := now.Month()
+	//day := now.Day()
+
+	fileName := fmt.Sprintf("成都 - %d年%02d月 - 下午茶报销.zip", year, month)
+	// 获取 GET 请求中的 directory 参数
+	directory := r.URL.Query().Get("directory")
+
+	if directory == "" {
+		http.Error(w, "缺少目录参数", http.StatusBadRequest)
+		return
+	}
+
+	defer func(path string) {
+		time.AfterFunc(10*time.Minute, func() {
+			err := clearTempDir(path)
+			if err != nil {
+				http.Error(w, "清理目录出错", http.StatusInternalServerError)
+			}
+		})
+	}(directory)
+
+	// 设置 Content-Type 为 zip 文件
+	w.Header().Set("Content-Type", "application/zip")
+	// 设置 Content-Disposition，让浏览器下载文件而不是直接打开
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+
+	// 将指定目录下的所有文件和子目录打包成 zip 文件，并写入到 HTTP 响应体中
+	err := zipFiles(directory, w)
+	if err != nil {
+		http.Error(w, "打包文件出错", http.StatusInternalServerError)
+		return
+	}
+}
+
+func saveFilesToTemp(path string, w http.ResponseWriter, r *http.Request) {
+	// 获取上传的文件
+	files := r.MultipartForm.File["pdfFiles"]
+	for _, fileHeader := range files {
+		// 打开上传的文件
+		file, err := fileHeader.Open()
+		if err != nil {
+			http.Error(w, "打开上传文件出错", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		err = os.MkdirAll(path, os.ModePerm)
+		if err != nil {
+			http.Error(w, "创建目录出错", http.StatusInternalServerError)
+			return
+		}
+
+		// 生成目标文件路径
+		targetFile := filepath.Join(path, fileHeader.Filename)
+
+		// 创建目标文件
+		f, err := os.Create(targetFile)
+		if err != nil {
+			http.Error(w, "创建文件出错", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		// 将上传的文件内容拷贝到目标文件中
+		_, err = io.Copy(f, file)
+		if err != nil {
+			http.Error(w, "保存文件出错", http.StatusInternalServerError)
+			return
+		}
+
+		// 提示上传成功
+		//fmt.Fprintf(w, "文件 %s 上传成功，保存到：%s\n", fileHeader.Filename, targetFile)
+	}
+}
+
+func indexHandler(w http.ResponseWriter, r *http.Request) {
+	// 读取HTML模板文件
+	tmpl, err := template.ParseFiles("upload.html")
+	if err != nil {
+		http.Error(w, "读取HTML模板出错", http.StatusInternalServerError)
+		return
+	}
+
+	// 渲染HTML模板
+	err = tmpl.Execute(w, nil)
+	if err != nil {
+		http.Error(w, "渲染HTML模板出错", http.StatusInternalServerError)
+		return
+	}
+}
+
+func main() {
+	http.HandleFunc("/upload", uploadHandler)
+	http.HandleFunc("/", indexHandler)
+	http.HandleFunc("/download", downloadHandler)
+
+	fmt.Println("服务器已启动，监听端口 8080...")
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("服务器启动失败:", err)
+		return
+	}
+
+}
+
+func genNewPdf(customMembers, dir string) string {
+
+	var resultToShow strings.Builder
+
+	members := defaultMembers
+
+	//dir = filepath.Join(dir, "/temp")
+	if len(customMembers) > 0 {
+		members = customMembers
+	}
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Println("读取目录出错:", err)
-		return
+		return ""
 	}
 	dateResultsMap := make(map[string][]*PdfResult)
 
@@ -93,7 +319,7 @@ func main() {
 
 	var totalAmounts float64
 
-	fmt.Printf("=====结果=====\n\n")
+	resultToShow.WriteString(fmt.Sprint("=====以下内容可以直接写入Approval=====\n\n"))
 	for dataResult, results := range dateResultsMap {
 		var folderName string
 		totalAmount := 0.0
@@ -103,10 +329,10 @@ func main() {
 		totalAmounts += totalAmount
 		folderName = fmt.Sprintf("%v/下午茶%v*%.2f元", dir, dataResult, totalAmount)
 
-		fmt.Printf("=====下午茶=====\n")
-		fmt.Printf("日期：%s\n", dataResult)
-		fmt.Printf("人员：%s\n", members)
-		fmt.Printf("当日总金额：%.2f\n", totalAmount)
+		resultToShow.WriteString("=====下午茶=====\n")
+		resultToShow.WriteString(fmt.Sprintf("日期：%s\n", dataResult))
+		resultToShow.WriteString(fmt.Sprintf("人员：%s\n", members))
+		resultToShow.WriteString(fmt.Sprintf("当日总金额：%.2f\n", totalAmount))
 		for _, result := range results {
 			var fileName string
 			if result.isLogistics {
@@ -117,18 +343,17 @@ func main() {
 			result.newPath = filepath.Join(folderName, fileName)
 			result.newFolderName = folderName
 			if result.isLogistics {
-				fmt.Printf("-(配送费)金额：%.2f\n", result.amount)
-				fmt.Printf("-(配送费)发票号码：%s\n", result.invoiceNumber)
+				resultToShow.WriteString(fmt.Sprintf("-(配送费)金额：%.2f\n", result.amount))
+				resultToShow.WriteString(fmt.Sprintf("-(配送费)发票号码：%s\n", result.invoiceNumber))
 			} else {
-				fmt.Printf("-(下午茶)金额：%.2f\n", result.amount)
-				fmt.Printf("-(下午茶)发票号码：%s\n", result.invoiceNumber)
+				resultToShow.WriteString(fmt.Sprintf("-(下午茶)金额：%.2f\n", result.amount))
+				resultToShow.WriteString(fmt.Sprintf("-(下午茶)发票号码：%s\n", result.invoiceNumber))
 			}
 		}
-		fmt.Printf("================\n\n")
+		resultToShow.WriteString("================\n\n")
 	}
-	fmt.Printf("共计金额: %.2f \n", totalAmounts)
-	fmt.Printf("================\n\n")
-
+	resultToShow.WriteString(fmt.Sprintf("共计金额: %.2f \n", totalAmounts))
+	resultToShow.WriteString("================\n\n")
 	for _, results := range dateResultsMap {
 		for _, result := range results {
 			// 如果目标目录不存在，则创建它
@@ -140,11 +365,12 @@ func main() {
 			// 重命名并移动文件
 			if err := os.Rename(result.oldPath, result.newPath); err != nil {
 				fmt.Println("重命名并移动文件出错:", err)
-				return
+				continue
 			}
 
 		}
 	}
+	return resultToShow.String()
 }
 
 func parseToPdfResult(path string) *PdfResult {
