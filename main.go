@@ -115,7 +115,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		Result:   resultToShow,
 	}
 	// 加载HTML模板文件
-	tmpl, err := template.ParseFiles("result.html")
+	tmpl, err := template.ParseFiles("./html/result.html")
 	if err != nil {
 		http.Error(w, "加载HTML模板文件出错", http.StatusInternalServerError)
 		return
@@ -257,7 +257,7 @@ func saveFilesToTemp(path string, w http.ResponseWriter, r *http.Request) {
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	// 读取HTML模板文件
-	tmpl, err := template.ParseFiles("upload.html")
+	tmpl, err := template.ParseFiles("./html/upload.html")
 	if err != nil {
 		http.Error(w, "读取HTML模板出错", http.StatusInternalServerError)
 		return

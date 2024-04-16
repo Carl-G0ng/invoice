@@ -4,6 +4,7 @@ all: build
 
 build:
 	go build -o invoice
+	#docker build -t invoice .
 
 run: build
 	# 检查端口是否被占用
@@ -12,6 +13,8 @@ run: build
 		sudo lsof -i :8889 -t | xargs -r sudo kill -9; \
 	fi
 	nohup sudo ./invoice &
+	#docker run -p 8080:8080 invoice
+
 
 clean:
 	rm -f invoice
