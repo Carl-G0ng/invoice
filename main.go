@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/unidoc/unipdf/v3/common/license"
 	"github.com/unidoc/unipdf/v3/extractor"
@@ -24,6 +25,16 @@ func main() {
 	if len(args) == 1 {
 		apiKey = args[0]
 	}
+	members := "Carl.Gong, Xuhui.Shi, Makiyo.Jiang, Sunny Tang"
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("请输入下午茶人员(如跳过将采用成都Team默认值)：")
+	scanner.Scan()
+	scannerText := scanner.Text()
+	if len(scannerText) > 0 {
+		members = scannerText
+	}
+	fmt.Printf("人员：%s\n", members)
+
 	// To get your free API key for metered license, sign up on: https://cloud.unidoc.io
 	// Make sure to be using UniPDF v3.19.1 or newer for Metered API key support.
 	err := license.SetMeteredKey(apiKey)
@@ -37,7 +48,7 @@ func main() {
 		fmt.Printf("Failed retrieving license key")
 		return
 	}
-	fmt.Printf("License: %s\n", lk.ToString())
+	//fmt.Printf("License: %s\n", lk.ToString())
 
 	// GetMeteredState freshly checks the state, contacting the licensing server.
 	state, err := license.GetMeteredState()
@@ -45,9 +56,9 @@ func main() {
 		fmt.Printf("ERROR getting metered state: %+v\n", err)
 		panic(err)
 	}
-	fmt.Printf("State: %+v\n", state)
+	//fmt.Printf("State: %+v\n", state)
 	if state.OK {
-		fmt.Printf("State is OK\n")
+		//fmt.Printf("State is OK\n")
 	} else {
 		fmt.Printf("State is not OK\n")
 	}
@@ -80,14 +91,22 @@ func main() {
 		dateResultsMap[pdfResult.date] = append(dateResultsMap[pdfResult.date], pdfResult)
 	}
 
+	var totalAmounts float64
+
+	fmt.Printf("=====结果=====\n\n")
 	for dataResult, results := range dateResultsMap {
 		var folderName string
 		totalAmount := 0.0
 		for _, result := range results {
 			totalAmount += result.amount
 		}
+		totalAmounts += totalAmount
 		folderName = fmt.Sprintf("%v/下午茶%v*%.2f元", dir, dataResult, totalAmount)
 
+		fmt.Printf("=====下午茶=====\n")
+		fmt.Printf("日期：%s\n", dataResult)
+		fmt.Printf("人员：%s\n", members)
+		fmt.Printf("当日总金额：%.2f\n", totalAmount)
 		for _, result := range results {
 			var fileName string
 			if result.isLogistics {
@@ -97,8 +116,18 @@ func main() {
 			}
 			result.newPath = filepath.Join(folderName, fileName)
 			result.newFolderName = folderName
+			if result.isLogistics {
+				fmt.Printf("-(配送费)金额：%.2f\n", result.amount)
+				fmt.Printf("-(配送费)发票号码：%s\n", result.invoiceNumber)
+			} else {
+				fmt.Printf("-(下午茶)金额：%.2f\n", result.amount)
+				fmt.Printf("-(下午茶)发票号码：%s\n", result.invoiceNumber)
+			}
 		}
+		fmt.Printf("================\n\n")
 	}
+	fmt.Printf("共计金额: %.2f \n", totalAmounts)
+	fmt.Printf("================\n\n")
 
 	for _, results := range dateResultsMap {
 		for _, result := range results {
@@ -205,10 +234,11 @@ func parseToPdfResult(path string) *PdfResult {
 	}
 
 	// Output extracted information.
-	fmt.Printf("InvoiceNumber: %v\n", invoiceNumber)
-	fmt.Printf("Amount: %.2f\n", amount)
-	fmt.Printf("Date: %s\n", date)
-	fmt.Printf("isLogistics: %v\n", isLogistics)
+	//fmt.Printf("InvoiceNumber: %v\n", invoiceNumber)
+	//fmt.Printf("Amount: %.2f\n", amount)
+	//fmt.Printf("Date: %s\n", date)
+	//fmt.Printf("isLogistics: %v\n", isLogistics)
+
 	pdfResult := &PdfResult{
 		invoiceNumber: invoiceNumber,
 		amount:        amount,
