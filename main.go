@@ -105,7 +105,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	//临时保存pdf
 	saveFilesToTemp(tempPath, w, r)
 
-	//fmt.Fprintf(w, "zip 下载链接：http://localhost:8080/download?directory=%v \n", tempPath)
+	//fmt.Fprintf(w, "zip 下载链接：http://localhost:8889/download?directory=%v \n", tempPath)
 	//收集转换pdf
 	resultToShow := genNewPdf(member, tempPath)
 
@@ -276,8 +276,8 @@ func main() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/download", downloadHandler)
 
-	fmt.Println("服务器已启动，监听端口 8080...")
-	err := http.ListenAndServe(":8080", nil)
+	fmt.Println("服务器已启动，监听端口 8889...")
+	err := http.ListenAndServe(":8889", nil)
 	if err != nil {
 		fmt.Println("服务器启动失败:", err)
 		return
