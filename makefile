@@ -1,26 +1,7 @@
-.PHONY: all build run clean
-
-all: build
+.PHONY: build run clean
 
 build:
-	go build -o invoice
-	#docker build -t invoice .
+	docker build -t invoice .
 
 run: build
-	# 检查端口是否被占用
-	if sudo lsof -i :8889 -t &>/dev/null; then \
-		echo "端口 8889 已被占用，终止占用该端口的进程"; \
-		sudo lsof -i :8889 -t | xargs -r sudo kill -9; \
-	fi
-	nohup sudo ./invoice &
-	#docker run -p 8080:8080 invoice
-
-
-clean:
-	rm -f invoice
-
-kill:
-	if sudo lsof -i :8889 -t &>/dev/null; then \
-		echo "终止端口 8889"; \
-		sudo lsof -i :8889 -t | xargs -r sudo kill -9; \
-	fi
+	docker run -p 9204:9204 invoice

@@ -1,26 +1,29 @@
 # 使用官方的golang镜像作为基础镜像
-FROM golang:latest AS build
+FROM golang:1.22.2 AS build
+
+MAINTAINER gyh
+
+VOLUME /home/invoice
+
+RUN mkdir -p /home/invoice
 
 # 设置工作目录
-WORKDIR /go/src/app
+WORKDIR /home/invoice
 
 # 将本地代码复制到容器中
-COPY . .
+COPY ./ /home/invoice/
 
 # 构建Go应用程序
-RUN go build -o invoce
+RUN go build -o invoice \
+    go env -w GO111MODULE=on  \
+    go env -w GOPROXY="https://goproxy.io,direct" \
+#    go env -w GOPRIVATE="*.corp.example.com"  \
+#    go env -w GOPRIVATE="*.corp.example.com" \
+#    go env -w GOPRIVATE="example.com/org_name" \
 
-# 新建一个小镜像，减少容器大小
-FROM alpine:latest
-
-# 设置工作目录
-WORKDIR /root/
-
-# 从构建镜像中复制二进制文件
-COPY --from=build /go/src/app/invoce .
 
 # 暴露端口
-EXPOSE 8889
+EXPOSE 9204
 
 # 运行应用程序
-CMD ["./invoce"]
+CMD ["/home/invoice/invoice"]

@@ -276,8 +276,8 @@ func main() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/download", downloadHandler)
 
-	fmt.Println("服务器已启动，监听端口 8889...")
-	err := http.ListenAndServe(":8889", nil)
+	fmt.Println("服务器已启动，监听端口 9204...")
+	err := http.ListenAndServe(":9204", nil)
 	if err != nil {
 		fmt.Println("服务器启动失败:", err)
 		return
